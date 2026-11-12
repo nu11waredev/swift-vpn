@@ -46,8 +46,7 @@ enum Base64 {
   /// That is checked in constant time, so a wrong guess at a key reveals
   /// nothing about where it differs.
   static func decodeCanonical(_ text: Span<UInt8>, maximumLength: Int) -> [UInt8]? {
-    guard text.count <= maximumLength else { return nil }
-    guard var bytes = decode(text) else { return nil }
+    guard text.count <= maximumLength, var bytes = decode(text) else { return nil }
     var canonical = encode(bytes.span)
     defer { wipe(&canonical) }
     guard constantTimeEqual(canonical.span, text) else {

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Merged two consecutive guards in the base64 decoder that had the same body. The length check still runs first, and the decoder is still not called for a text that is too long.
+- CI can be started by hand from the Actions page, as well as by a push to `main` or a pull request.
 - Reworded the README. The opening sentence ends "written in Swift and SwiftUI.", the key pair is In the package, the Tests section describes what each test checks, and Building points to `CONTRIBUTING.md` for the check and the signing values it refuses.
 - Extended the signing step. It refuses a setting written as `KEY: value` or `"KEY": "value"` anywhere on a line, a `CFBundleIdentifier` in a property list that does not start with the prefix, a team identifier under `com.apple.developer.team-identifier`, a team id in an entitlement value, and a file that Git treats as binary and that names a signing setting. `scripts/test-signing-check` has a case for each.
 - Pinned swift-tunnel at the revision that renamed its module to `Tunnel`. VPNCore links only the `X25519` product, which is unchanged.
