@@ -1,0 +1,17 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+build/
+xcuserdata/
+*.xcuserstate
+*.xcodeproj
+*.ipa
+*.dSYM.zip
+
+# Signing stays on the machine that signs.
+Config/Local.xcconfig
+ExportOptions.plist
+*.mobileprovision
+*.p12
+*.p8
