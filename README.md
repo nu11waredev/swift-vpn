@@ -5,7 +5,7 @@
 [![Platforms](https://img.shields.io/badge/Platforms-iOS%20%7C%20macOS-0969DA)](VPNCore/Package.swift)
 [![Licence MPL 2.0](https://img.shields.io/badge/Licence-MPL%202.0-8250DF)](LICENSE)
 
-VPN is a WireGuard VPN client for iOS and macOS, written in Swift and SwiftUI. The finished app covers the WireGuard tunnel and handshake, a kill switch, DNS filtering on the device, a post-quantum handshake, obfuscation, multihop and the server lists of VPN providers. The repository holds the Xcode project with the app and a packet tunnel extension, and a Swift package, VPNCore, with the key pair type.
+VPN is a WireGuard VPN client for iOS and macOS, written in Swift and SwiftUI. The finished app covers the WireGuard tunnel and handshake, a kill switch, DNS filtering on the device, a post-quantum handshake, obfuscation, multihop and the server lists of VPN providers. Today the repository contains the Xcode project with the app and a packet tunnel extension, and a Swift package, VPNCore, with the key pair type.
 
 ## Design
 
@@ -19,17 +19,17 @@ Signing values stay out of the tracked files. `Config/Base.xcconfig` sets an emp
 
 Each part is tested and recorded in `CHANGELOG.md` as it lands. A part is In the package once VPNCore contains and tests it, and In the app once the app uses it.
 
-| Part | What it does | State |
+| Part | Description | State |
 | --- | --- | --- |
-| Key pair | Makes a WireGuard private key and its public key on the device, readable as bytes and as standard base64 | In the package |
-| WireGuard tunnel and handshake | Runs the WireGuard protocol in the packet tunnel extension | Next |
-| Kill switch and always-on | Blocks traffic while the tunnel is down and starts the tunnel again after a restart | Planned |
-| On-device DNS filtering | Applies blocklists to DNS queries inside the tunnel | Planned |
-| Post-quantum handshake | Adds a post-quantum key exchange to the WireGuard handshake | Planned |
-| Obfuscation | Carries WireGuard packets over UDP over TCP, Shadowsocks or QUIC | Planned |
-| Multihop | Routes traffic through two servers in turn | Planned |
-| Provider server lists | Reads the server lists that VPN providers publish | Planned |
-| Control Center control, widget and Shortcuts | Starts and stops the tunnel from Control Center, a widget and the Shortcuts app | Planned |
+| Key pair | The key pair makes a WireGuard private key and its public key on the device, readable as bytes and as standard base64. | In the package |
+| WireGuard tunnel and handshake | The tunnel and handshake run the WireGuard protocol in the packet tunnel extension. | Next |
+| Kill switch and always-on | The kill switch blocks traffic while the tunnel is down, and always-on starts the tunnel again after a restart. | Planned |
+| On-device DNS filtering | DNS filtering applies blocklists to DNS queries inside the tunnel. | Planned |
+| Post-quantum handshake | The post-quantum handshake adds a post-quantum key exchange to the WireGuard handshake. | Planned |
+| Obfuscation | Obfuscation carries WireGuard packets over UDP over TCP, Shadowsocks or QUIC. | Planned |
+| Multihop | Multihop routes traffic through two servers in turn. | Planned |
+| Provider server lists | The provider server lists are read from the lists that VPN providers publish. | Planned |
+| Control Center control, widget and Shortcuts | The control, the widget and the Shortcuts actions start and stop the tunnel from Control Center, the Home Screen and the Shortcuts app. | Planned |
 
 ## Building
 
@@ -45,9 +45,11 @@ Use `generic/platform=macOS` for the Mac. To sign a build, create `Config/Local.
 
 ## Usage
 
-In a file that imports `VPNCore`, make a key pair and read it back from its base64 form:
+Make a key pair and read it back from its base64 form:
 
 ```swift
+import VPNCore
+
 let pair = KeyPair()
 let privateKey = pair.privateKeyBase64
 let publicKey = pair.publicKeyBase64
@@ -55,10 +57,10 @@ let publicKey = pair.publicKeyBase64
 let restored = try KeyPair(privateKeyBase64: privateKey)
 ```
 
-| Type | Use |
+| Type | Description |
 | --- | --- |
-| `KeyPair` | A private key of 32 random bytes from the system generator, and the public key derived from it with X25519. `init(privateKeyBytes:)` and `init(privateKeyBase64:)` make a pair from a stored private key. `privateKeyBytes`, `publicKeyBytes`, `privateKeyBase64` and `publicKeyBase64` return copies of the keys that the caller owns. |
-| `KeyPairError` | `invalidLength` when the private key is not 32 bytes long. `invalidTextLength` when base64 text is not exactly 44 characters. `invalidBase64` when the text is not the canonical standard base64 of a byte string. |
+| `KeyPair` | `KeyPair` is a private key of 32 random bytes from the system generator, and the public key derived from it with X25519. `init(privateKeyBytes:)` and `init(privateKeyBase64:)` make a pair from a stored private key. `privateKeyBytes`, `publicKeyBytes`, `privateKeyBase64` and `publicKeyBase64` return copies of the keys that the caller owns. |
+| `KeyPairError` | `KeyPairError` is thrown when a key cannot be read. `invalidLength` means the private key is not 32 bytes long, `invalidTextLength` means base64 text is not exactly 44 characters, and `invalidBase64` means the text is not the canonical standard base64 of a byte string. |
 
 ## Security
 
@@ -66,20 +68,24 @@ let restored = try KeyPair(privateKeyBase64: privateKey)
 
 `init(privateKeyBase64:)` rejects any text that is not exactly 44 characters before it copies or decodes anything. It then decodes the text, encodes the bytes again and checks that the two texts match. Each buffer in between is overwritten with zeros before it is released, and the comparison takes the same time wherever the texts differ.
 
-`privateKeyBytes` and `privateKeyBase64` return copies that the caller owns and looks after. The caller overwrites a returned array when it is done with it. A returned `String` stays in memory until the system reuses it, and so does a `String` passed to `init(privateKeyBase64:)`.
+`privateKeyBytes` and `privateKeyBase64` return copies that the caller owns and looks after. The caller overwrites a returned array when it is done with it. Pass and read the key as bytes when it must be wiped. A `String` stays in memory until the system reuses it, whether `privateKeyBase64` returned it or `init(privateKeyBase64:)` received it.
 
-A vulnerability is reported privately from the repository's Security tab. `SECURITY.md` has the details.
+Report a vulnerability privately from the repository's Security tab. `SECURITY.md` has the details.
 
 ## Tests
 
-Run the package tests with `swift test --package-path VPNCore`. They check the public keys of the two private keys in RFC 7748, section 6.1, the base64 form of both pairs, round trips through bytes and base64, and the error for each rejected input: private keys of the wrong length, base64 text that is not 44 characters long, base64 that spells the wrong number of bytes, and text that is not canonical base64. The base64 code is checked against the vectors in RFC 4648, section 10, and its length limit has its own tests. The tests of the byte comparison check its result for equal byte strings, for byte strings that differ at one position and for byte strings of different lengths. The test of `wipe()` checks that it sets every byte of an array to zero. A test holds the usage example above word for word, compiles it and runs it.
+Run the package tests with `swift test --package-path VPNCore`, or run `scripts/check` to build, test and lint. The key pair tests check the public keys of the two private keys in RFC 7748, section 6.1, the base64 form of both pairs, round trips through bytes and base64, and the error for each rejected input: private keys of the wrong length, base64 text that is not 44 characters long, base64 that spells the wrong number of bytes, and text that is not canonical base64.
 
-`scripts/check` runs these tests, the builds, the lint and the signing step. `scripts/test-signing-check` tests that step in throwaway Git repositories, with a case for each kind of value it refuses and each kind it accepts. Every pull request runs `scripts/check` on macOS.
+The base64 code is checked against the vectors in RFC 4648, section 10, and its length limit has its own tests. The tests of the byte comparison check its result for equal byte strings, for byte strings that differ at one position and for byte strings of different lengths. The test of `wipe()` checks that it sets every byte of an array to zero.
+
+`scripts/test-signing-check` tests the signing step of `scripts/check` in throwaway Git repositories, with a case for each kind of value it refuses and each kind it accepts. A test compiles and checks the usage example above. CI runs `scripts/check` on macOS for every pull request.
 
 ## Requirements
 
-Swift 6.4, Xcode 27, and iOS 26 or macOS 26. Linting needs [SwiftFormat](https://github.com/nicklockwood/SwiftFormat).
+VPN requires Swift 6.4 and Xcode 27. It runs on iOS 26 and macOS 26. Linting needs [SwiftFormat](https://github.com/nicklockwood/SwiftFormat).
 
 ## Licence
 
-MPL 2.0, in `LICENSE`. "WireGuard" is a registered trademark of Jason A. Donenfeld.
+VPN is available under the Mozilla Public License 2.0. See `LICENSE`.
+
+"WireGuard" is a registered trademark of Jason A. Donenfeld.

@@ -20,15 +20,15 @@ Signing values belong in `Config/Local.xcconfig`, which Git ignores. The signing
 
 An empty value, a `-` identity and a reference such as `$(inherited)` pass.
 
+## Commits
+
+A commit subject is a conventional commit: a type, a colon and a short imperative summary, such as `fix: reject base64 text of the wrong length`. The type is one of `feat`, `fix`, `docs`, `test`, `refactor`, `build`, `ci` or `chore`. A scope in parentheses after the type is optional, as in `feat(vpncore): add the key pair type`. The summary starts in lower case and has no full stop.
+
 ## The code
 
 Protocol and cryptography code is written from the specification: the WireGuard paper and the RFCs it cites. Code translated from another implementation is not accepted. Other implementations are used only from the outside, for interoperability tests and benchmarks.
 
-A change comes with tests, and a test's expected values come from a published vector or an independent implementation.
-
-## Commits
-
-A commit message is a conventional commit, such as `feat: key pair in a local package`.
+A change comes with tests, and a test's expected values come from a published vector or an independent implementation. A test holds the usage example in the README word for word, so a change to the example is made in `README.md` and in `VPNCore/Tests/VPNCoreTests/ReadmeExampleTests.swift` together.
 
 ## Security
 
