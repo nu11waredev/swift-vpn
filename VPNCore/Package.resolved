@@ -1,0 +1,14 @@
+{
+  "originHash" : "521d07c87be957aba768a714255ed15676317dc4b2414ba6c55801f11289f948",
+  "pins" : [
+    {
+      "identity" : "swift-tunnel",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/nu11waredev/swift-tunnel",
+      "state" : {
+        "revision" : "28f41ace3e10048852d4bd04cab19ddec8756072"
+      }
+    }
+  ],
+  "version" : 3
+}

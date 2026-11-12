@@ -1,0 +1,12 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+// Signing values are set in Local.xcconfig, which is not tracked.
+DEVELOPMENT_TEAM =
+BUNDLE_ID_PREFIX = com.example
+
+// A warning fails the build.
+SWIFT_TREAT_WARNINGS_AS_ERRORS = YES
+
+#include? "Local.xcconfig"

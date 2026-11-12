@@ -1,0 +1,301 @@
+#!/bin/zsh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Tests `scripts/check signing`. Each case stages one file in a throwaway git
+# repository under $TMPDIR, runs the step there and compares its exit status
+# with the one the case expects. The repository holds a copy of
+# scripts/check, so the step also reads its own source, as it does in a real
+# checkout. The setting names are held in variables so that no line of this
+# file assigns to one, and the step can scan this file as it scans the rest.
+set -euo pipefail
+
+# The settings come from the repository under test, never from the user's own
+# git configuration.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+
+root="${0:A:h:h}"
+sandbox="$(mktemp -d "${TMPDIR:-/tmp}/signing-check.XXXXXX")"
+trap 'rm -rf "$sandbox"' EXIT
+# A directory that is not inside any repository, wherever $TMPDIR is.
+export GIT_CEILING_DIRECTORIES="$sandbox"
+
+team=DEVELOPMENT_TEAM
+camel=DevelopmentTeam
+prefix=BUNDLE_ID_PREFIX
+identifier=PRODUCT_BUNDLE_IDENTIFIER
+identity=CODE_SIGN_IDENTITY
+profile=PROVISIONING_PROFILE
+specifier=PROVISIONING_PROFILE_SPECIFIER
+plist_team=DevelopmentTeam
+plist_id=teamID
+lowered_team=development_team
+bundle_key=CFBundleIdentifier
+team_key=com.apple.developer.team-identifier
+team_value=ABCDE12345
+
+repo="$sandbox/repo"
+mkdir -p "$repo/scripts"
+git -C "$repo" init -q
+cp "$root/scripts/check" "$repo/scripts/check"
+
+total=0
+failures=0
+
+# Runs the step in `directory` and reports whether it passed.
+run_step() {
+  (cd "$1" && scripts/check signing) >/dev/null 2>&1 && return 0 || return 1
+}
+
+# Compares the outcome with what the case expects.
+verdict() {
+  local expected="$1" name="$2" outcome=pass
+  shift 2
+  run_step "$@" || outcome=fail
+  total=$(( total + 1 ))
+  if [[ "$outcome" != "$expected" ]]; then
+    print -u2 -r -- "FAIL: ${name}: expected ${expected}, got ${outcome}"
+    failures=$(( failures + 1 ))
+  fi
+}
+
+# stage EXPECTED NAME PATH CONTENT: the index holds the check and one file.
+stage() {
+  local expected="$1" name="$2" file="$3" content="$4"
+  git -C "$repo" read-tree --empty
+  mkdir -p "$repo/${file:h}"
+  print -r -- "$content" > "$repo/$file"
+  git -C "$repo" add -f scripts/check "$file"
+  verdict "$expected" "$name" "$repo"
+}
+
+# stage_bytes EXPECTED NAME PATH FORMAT: like stage, with the content written by
+# printf, so that a file can hold a NUL byte and be binary to git.
+stage_bytes() {
+  local expected="$1" name="$2" file="$3" format="$4"
+  git -C "$repo" read-tree --empty
+  mkdir -p "$repo/${file:h}"
+  printf '%b' "$format" > "$repo/$file"
+  git -C "$repo" add -f scripts/check "$file"
+  verdict "$expected" "$name" "$repo"
+}
+
+# --- A development team ------------------------------------------------------
+
+stage fail 'team set in an xcconfig' Config/A.xcconfig "$team = ABC123"
+stage fail 'team without spaces' Config/A.xcconfig "$team=ABC123"
+stage fail 'team in lower case' Config/A.xcconfig "$lowered_team = ABC123"
+stage fail 'team with one condition' Config/A.xcconfig "${team}[sdk=iphoneos*] = ABC123"
+stage fail 'team with two conditions' Config/A.xcconfig "${team}[sdk=iphoneos*][arch=arm64] = ABC123"
+stage fail 'team with three conditions' Config/A.xcconfig "${team}[sdk=iphoneos*][arch=arm64][config=Debug] = ABC123"
+stage fail 'team after a reference' Config/A.xcconfig "$team = \$(inherited) ABC123"
+stage fail 'team in a YAML map' project.yml "$team: ABC123"
+stage fail 'team in a quoted YAML map' project.yml "  \"$team\": \"ABC123\""
+stage fail 'team in a YAML list item' project.yml "- $team: ABC123"
+stage fail 'team in a project file' P.pbxproj $'\t\t\t\t'"$team = ABC123;"
+stage fail 'quoted team in a project file' P.pbxproj $'\t\t\t\t'"$team = \"ABC123\";"
+stage fail 'team in a one-line project dictionary' P.pbxproj \
+  $'\t\t\t\t'"X = { $camel = ABC123; ProvisioningStyle = Automatic; };"
+stage fail 'second team in a one-line dictionary' P.pbxproj \
+  $'\t\t\t\t'"X = { $camel = \"\"; $camel = ABC123; };"
+stage fail 'team exported in a script' build.sh "export $team=ABC123"
+stage fail 'team in an xcodebuild argument' build.sh "xcodebuild build $team=ABC123 CODE_SIGNING_ALLOWED=NO"
+stage fail 'team in a property list' App.plist $'<dict>\n\t<key>'"$plist_team"$'</key>\n\t<string>ABC123</string>\n</dict>'
+stage fail 'team in a property list on one line' App.plist "<key>$plist_team</key><string>ABC123</string>"
+stage fail 'team id in a property list' App.plist $'<key>'"$plist_id"$'</key>\n<string>ABC123</string>'
+stage fail 'second team in a property list' App.plist \
+  $'<key>'"$plist_team"$'</key>\n<string></string>\n<key>'"$plist_id"$'</key>\n<string>ABC123</string>'
+
+stage pass 'empty team' Config/A.xcconfig "$team ="
+stage pass 'empty team with spaces' Config/A.xcconfig "$team =   "
+stage pass 'empty team before a comment' Config/A.xcconfig "$team = // set in Local.xcconfig"
+stage pass 'team that is a reference' Config/A.xcconfig "$team = \$(inherited)"
+stage pass 'team that is another reference' Config/A.xcconfig "$team = \$(LOCAL_TEAM)"
+stage pass 'team that is a braced reference' Config/A.xcconfig "$team = \${LOCAL_TEAM}"
+stage pass 'team with a condition and no value' Config/A.xcconfig "${team}[sdk=iphoneos*][arch=arm64] ="
+stage pass 'commented out team' Config/A.xcconfig "// $team = ABC123"
+stage pass 'indented comment' Config/A.xcconfig "  // $team = ABC123"
+stage pass 'empty team in a project file' P.pbxproj $'\t\t\t\t'"$team = \"\";"
+stage pass 'empty team in a one-line dictionary' P.pbxproj \
+  $'\t\t\t\t'"X = { $camel = \"\"; ProvisioningStyle = Automatic; };"
+stage pass 'empty team in a YAML map' project.yml "$team: \"\""
+stage pass 'team compared in a script' build.sh "[[ \$$team == ABC123 ]]"
+stage pass 'team named in prose' notes.md "Set $team and platform=macOS in Local.xcconfig."
+stage pass 'team read from a reference in a script' build.sh "xcodebuild build $team=\$TEAM"
+stage pass 'empty team in a property list' App.plist $'<key>'"$plist_team"$'</key>\n<string></string>'
+stage pass 'team in a property list as a self-closing string' App.plist $'<key>'"$plist_team"$'</key>\n<string/>'
+stage pass 'team in a property list as a reference' App.plist \
+  $'<key>'"$plist_team"$'</key>\n<string>$('"$team"$')</string>'
+stage pass 'property list without a team' App.plist $'<key>CFBundleName</key>\n<string>VPN</string>'
+
+# --- Settings in the middle of a line ----------------------------------------
+
+stage fail 'team in a JSON object' config.json "{\"$team\":\"ABC123\"}"
+stage fail 'team in a JSON object with spaces' config.json "{ \"$team\": \"ABC123\", \"other\": 1 }"
+stage fail 'team in a Swift dictionary literal' Sign.swift "let values = [\"$team\": \"ABC123\"]"
+stage fail 'team with a condition in a JSON object' config.json "{\"${team}[sdk=iphoneos*]\":\"ABC123\"}"
+stage fail 'team after a colon in the middle of a line' build.yml "env: { $team: ABC123 }"
+stage fail 'another prefix in a JSON object' config.json "{\"$prefix\":\"com.acme\"}"
+stage fail 'identifier in a JSON object' config.json "{\"$identifier\":\"com.acme.vpn\"}"
+stage fail 'signing identity in a JSON object' config.json "{\"$identity\":\"Apple Development\"}"
+stage fail 'profile specifier in a Swift dictionary literal' Sign.swift "let values = [\"$specifier\": \"Example\"]"
+stage fail 'team unquoted before a closing bracket' Sign.swift "let values = [$team: ABC123]"
+stage pass 'team in a JSON object as a braced reference' config.json "{\"$team\":\"\${LOCAL_TEAM}\"}"
+stage pass 'empty team in a JSON object' config.json "{\"$team\":\"\"}"
+stage pass 'empty team in a Swift dictionary literal' Sign.swift "let values = [\"$team\": \"\"]"
+stage pass 'team reference in a JSON object' config.json "{\"$team\":\"\$(LOCAL_TEAM)\"}"
+stage pass 'prefix com.example in a JSON object' config.json "{\"$prefix\":\"com.example\"}"
+stage pass 'dash signing identity in a JSON object' config.json "{\"$identity\":\"-\"}"
+
+# --- The bundle identifier prefix --------------------------------------------
+
+stage pass 'prefix is com.example' Config/A.xcconfig "$prefix = com.example"
+stage pass 'prefix without spaces' Config/A.xcconfig "$prefix=com.example"
+stage pass 'prefix with a trailing comment' Config/A.xcconfig "$prefix = com.example // placeholder"
+stage pass 'prefix with a condition' Config/A.xcconfig "${prefix}[sdk=iphoneos*][arch=arm64] = com.example"
+stage pass 'prefix in a project file' P.pbxproj $'\t\t\t\t'"$prefix = \"com.example\";"
+stage pass 'prefix exported in a script' build.sh "export $prefix=com.example"
+stage pass 'prefix in an xcodebuild argument' build.sh "xcodebuild build $prefix=com.example CODE_SIGNING_ALLOWED=NO"
+stage pass 'commented out prefix' Config/A.xcconfig "// $prefix = com.acme"
+stage pass 'prefix compared in a script' build.sh "[[ \$$prefix == com.acme ]]"
+stage fail 'another prefix' Config/A.xcconfig "$prefix = com.acme"
+stage fail 'another prefix without spaces' Config/A.xcconfig "$prefix=com.acme"
+stage fail 'another prefix with one condition' Config/A.xcconfig "${prefix}[sdk=iphoneos*] = com.acme"
+stage fail 'another prefix with two conditions' Config/A.xcconfig "${prefix}[sdk=iphoneos*][arch=arm64] = com.acme"
+stage fail 'another prefix in a project file' P.pbxproj $'\t\t\t\t'"$prefix = \"com.acme\";"
+stage fail 'another prefix exported in a script' build.sh "export $prefix=com.acme"
+stage fail 'another prefix in an xcodebuild argument' build.sh "xcodebuild build $prefix=com.acme CODE_SIGNING_ALLOWED=NO"
+stage fail 'another prefix in a YAML map' project.yml "$prefix: com.acme"
+stage fail 'prefix in a different case' Config/A.xcconfig "$prefix = com.Example"
+stage fail 'prefix after a reference' Config/A.xcconfig "$prefix = \$(inherited) com.acme"
+
+# --- The bundle identifier ---------------------------------------------------
+
+stage pass 'identifier from the prefix' Config/A.xcconfig "$identifier = \$(BUNDLE_ID_PREFIX).vpn"
+stage pass 'identifier from the braced prefix' Config/A.xcconfig "$identifier = \${BUNDLE_ID_PREFIX}.vpn"
+stage pass 'identifier from the prefix with two conditions' Config/A.xcconfig \
+  "${identifier}[sdk=iphoneos*][arch=arm64] = \$(BUNDLE_ID_PREFIX).vpn"
+stage pass 'identifier in a project file' P.pbxproj $'\t\t\t\t'"$identifier = \"\$(BUNDLE_ID_PREFIX).vpn.tunnel\";"
+stage pass 'inherited identifier' Config/A.xcconfig "$identifier = \$(inherited)"
+stage fail 'identifier that skips the prefix' Config/A.xcconfig "$identifier = com.acme.vpn"
+stage fail 'identifier with one condition' Config/A.xcconfig "${identifier}[sdk=iphoneos*] = com.acme.vpn"
+stage fail 'identifier with two conditions' Config/A.xcconfig "${identifier}[sdk=iphoneos*][arch=arm64] = com.acme.vpn"
+stage fail 'identifier in a project file' P.pbxproj $'\t\t\t\t'"$identifier = \"com.acme.vpn\";"
+stage fail 'identifier in a YAML map' project.yml "$identifier: com.acme.vpn"
+stage fail 'identifier from another setting' Config/A.xcconfig "$identifier = \$(PRODUCT_NAME).vpn"
+
+# --- A signing identity and a provisioning profile ---------------------------
+
+stage fail 'named signing identity' Config/A.xcconfig "$identity = Apple Development"
+stage fail 'quoted signing identity' P.pbxproj $'\t\t\t\t'"$identity = \"iPhone Developer\";"
+stage fail 'signing identity with two conditions' Config/A.xcconfig "${identity}[sdk=iphoneos*][arch=arm64] = Apple Development"
+stage fail 'signing identity in a YAML map' project.yml "$identity: Apple Development"
+stage fail 'profile' Config/A.xcconfig "$profile = Example"
+stage fail 'profile specifier' Config/A.xcconfig "$specifier = Example"
+stage fail 'profile specifier with two conditions' Config/A.xcconfig "${specifier}[sdk=iphoneos*][arch=arm64] = Example"
+stage fail 'quoted profile specifier' P.pbxproj $'\t\t\t\t'"$specifier = \"Example Profile\";"
+stage pass 'signing identity of a dash' Config/A.xcconfig "$identity = -"
+stage pass 'quoted dash signing identity' P.pbxproj $'\t\t\t\t'"\"${identity}[sdk=macosx*]\" = \"-\";"
+stage pass 'empty signing identity' Config/A.xcconfig "$identity ="
+stage pass 'inherited signing identity' Config/A.xcconfig "$identity = \$(inherited)"
+stage pass 'signing identity from a braced reference' Config/A.xcconfig "$identity = \${LOCAL_IDENTITY}"
+stage pass 'empty profile' Config/A.xcconfig "$profile ="
+stage pass 'empty profile specifier' Config/A.xcconfig "$specifier = // none"
+stage pass 'inherited profile specifier' Config/A.xcconfig "$specifier = \$(inherited)"
+stage pass 'empty profile in a project file' P.pbxproj $'\t\t\t\t'"$specifier = \"\";"
+
+# --- Identifiers in property lists and entitlements --------------------------
+
+stage fail 'bundle identifier in a property list' Info.plist \
+  $'<key>'"$bundle_key"$'</key>\n<string>com.acme.vpn</string>'
+stage fail 'bundle identifier in a property list on one line' Info.plist \
+  "<key>$bundle_key</key><string>com.acme.vpn</string>"
+stage fail 'bundle identifier that only starts like the example prefix' Info.plist \
+  "<key>$bundle_key</key><string>com.examples.vpn</string>"
+stage fail 'bundle identifier of an unrelated setting' Info.plist \
+  "<key>$bundle_key</key><string>\$(PRODUCT_NAME)</string>"
+stage pass 'bundle identifier from the prefix in a property list' Info.plist \
+  "<key>$bundle_key</key><string>\$(BUNDLE_ID_PREFIX).vpn</string>"
+stage pass 'bundle identifier from the braced prefix in a property list' Info.plist \
+  "<key>$bundle_key</key><string>\${BUNDLE_ID_PREFIX}.vpn</string>"
+stage pass 'bundle identifier from the identifier setting' Info.plist \
+  "<key>$bundle_key</key><string>\$($identifier)</string>"
+stage pass 'bundle identifier under the example prefix' Info.plist \
+  "<key>$bundle_key</key><string>com.example.vpn</string>"
+stage pass 'empty bundle identifier in a property list' Info.plist \
+  "<key>$bundle_key</key><string></string>"
+
+stage fail 'team identifier entitlement' App.entitlements \
+  $'<key>'"$team_key"$'</key>\n<string>'"$team_value"$'</string>'
+stage pass 'team identifier entitlement from a reference' App.entitlements \
+  "<key>$team_key</key><string>\$($team)</string>"
+stage pass 'empty team identifier entitlement' App.entitlements \
+  "<key>$team_key</key><string></string>"
+stage fail 'team id at the start of an application identifier' App.entitlements \
+  $'<key>application-identifier</key>\n<string>'"$team_value"$'.com.example.vpn</string>'
+stage fail 'team id in an access group array' App.entitlements \
+  $'<key>keychain-access-groups</key>\n<array>\n<string>'"$team_value"$'.com.example</string>\n</array>'
+stage fail 'bare team id in an entitlement value' App.entitlements \
+  "<key>some-group</key><string>$team_value</string>"
+stage pass 'access group from the prefix reference' App.entitlements \
+  $'<key>keychain-access-groups</key>\n<array>\n<string>$(AppIdentifierPrefix)com.example</string>\n</array>'
+stage pass 'ten digits in a property list value' Info.plist \
+  "<key>CFBundleVersion</key><string>2026111200</string>"
+stage pass 'entitlement values in lower case' App.entitlements \
+  "<key>com.apple.developer.networking.networkextension</key><array><string>packet-tunnel-provider</string></array>"
+
+# --- Files that git treats as binary -----------------------------------------
+
+stage_bytes fail 'team in a file with a NUL byte' Config/A.xcconfig "$team = ABC123\\0"
+stage_bytes fail 'team in a NUL file under another name' Blob.dat "x\\0$team = ABC123\\n"
+stage_bytes fail 'bundle identifier key in a binary property list' Info.plist "bplist00\\0$bundle_key"
+stage_bytes fail 'team id key in a binary property list' Info.plist "bplist00\\0$plist_id"
+stage_bytes fail 'team identifier key in a binary entitlements file' App.entitlements "bplist00\\0$team_key"
+stage_bytes pass 'binary file that names no signing setting' Icon.png 'PNG\\0data'
+
+# --- Signing assets ----------------------------------------------------------
+
+for asset in a.mobileprovision a.provisionprofile a.p12 a.pfx a.cer a.crt a.der a.pem a.key a.p8 \
+  ExportOptions.plist sub/ExportOptions.plist Upper.PEM Config/Local.xcconfig; do
+  stage fail "tracked ${asset}" "$asset" 'x'
+done
+stage pass 'tracked ordinary files' Config/Base.xcconfig '// nothing to see'
+
+# --- Where the step reads from, and what it does when git fails --------------
+
+# A bad value that is staged and then edited out of the working tree is still
+# in the index, which is what a commit takes.
+git -C "$repo" read-tree --empty
+print -r -- "$team = ABC123" > "$repo/Config/Staged.xcconfig"
+git -C "$repo" add -f scripts/check Config/Staged.xcconfig
+print -r -- "$team =" > "$repo/Config/Staged.xcconfig"
+verdict fail 'staged value hidden by a working tree edit' "$repo"
+
+# A bad value that is only in the working tree is not tracked.
+git -C "$repo" read-tree --empty
+print -r -- "$team =" > "$repo/Config/Staged.xcconfig"
+git -C "$repo" add -f scripts/check Config/Staged.xcconfig
+print -r -- "$team = ABC123" > "$repo/Config/Staged.xcconfig"
+verdict pass 'untracked edit in the working tree' "$repo"
+
+# Outside a git repository the step cannot check anything and fails.
+bare="$sandbox/bare"
+mkdir -p "$bare/scripts"
+cp "$root/scripts/check" "$bare/scripts/check"
+verdict fail 'outside a git repository' "$bare"
+
+# An index that git cannot read makes git grep fail with a status above 1.
+broken="$sandbox/broken"
+mkdir -p "$broken/scripts"
+git -C "$broken" init -q
+cp "$root/scripts/check" "$broken/scripts/check"
+git -C "$broken" add -f scripts/check
+print -r -- 'not an index' > "$broken/.git/index"
+verdict fail 'an index git cannot read' "$broken"
+
+if (( failures )); then
+  print -u2 -r -- "${failures} of ${total} signing checks failed."
+  exit 1
+fi
+print -r -- "${total} signing checks passed."

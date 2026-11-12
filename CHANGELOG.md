@@ -1,0 +1,13 @@
+# Changelog
+
+## Unreleased
+
+- Reworded the README. The opening sentence ends "written in Swift and SwiftUI.", the key pair is In the package, the Tests section describes what each test checks, and Building points to `CONTRIBUTING.md` for the check and the signing values it refuses.
+- Extended the signing step. It refuses a setting written as `KEY: value` or `"KEY": "value"` anywhere on a line, a `CFBundleIdentifier` in a property list that does not start with the prefix, a team identifier under `com.apple.developer.team-identifier`, a team id in an entitlement value, and a file that Git treats as binary and that names a signing setting. `scripts/test-signing-check` has a case for each.
+- Pinned swift-tunnel at the revision that renamed its module to `Tunnel`. VPNCore links only the `X25519` product, which is unchanged.
+- Removed `GCC_TREAT_WARNINGS_AS_ERRORS`, because the project has no C code, and `ASSETCATALOG_COMPILER_APPICON_NAME`, because the project has no asset catalog.
+- Split `KeyPairError.invalidLength` in two. `invalidLength` now covers only a private key that is not 32 bytes long, and the new `invalidTextLength` covers base64 text that is not 44 characters long.
+- Added the check script, the pre-push hook and the CI workflow. The check reads the tracked files as Git stores them and fails when one sets a development team, a code signing identity or a provisioning profile, sets a bundle identifier prefix other than `com.example`, sets a bundle identifier that does not start with the prefix, or is a signing asset such as a key, certificate, `ExportOptions.plist` or `Config/Local.xcconfig`. It also fails outside a Git repository and when Git returns an error. `scripts/test-signing-check` tests it in throwaway repositories.
+- Added the app and the packet tunnel extension. The extension fails a start request with the error "The tunnel is unavailable in this version of VPN." Both targets carry the packet tunnel, app sandbox and network client entitlements.
+- Added the key pair, with its private and public keys as bytes and as standard base64. The base64 text is encoded and decoded in buffers that are overwritten with zeros before release, and the check that a text is canonical compares in constant time. `init(privateKeyBase64:)` rejects text that is not exactly 44 characters before it copies or decodes anything. The package tests the RFC 7748 keys, the RFC 4648 base64 vectors and the usage example in the README.
+- Pinned swift-tunnel to a commit instead of a branch, turned warnings into errors for the package and the Xcode project, and removed the code signing identity from the project file.

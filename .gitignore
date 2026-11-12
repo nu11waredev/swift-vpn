@@ -5,7 +5,6 @@ DerivedData/
 build/
 xcuserdata/
 *.xcuserstate
-*.xcodeproj
 *.ipa
 *.dSYM.zip
 
@@ -13,5 +12,12 @@ xcuserdata/
 Config/Local.xcconfig
 ExportOptions.plist
 *.mobileprovision
+*.provisionprofile
 *.p12
+*.cer
 *.p8
+*.pfx
+*.pem
+*.key
+*.crt
+*.der
