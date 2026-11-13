@@ -20,9 +20,19 @@ Signing values belong in `Config/Local.xcconfig`, which Git ignores. The signing
 
 An empty value, a `-` identity and a reference such as `$(inherited)` pass.
 
+## Tests
+
+Run the package tests alone with `swift test --package-path VPNCore`. `scripts/check` builds, tests and lints. The key pair tests check the public keys of the two private keys in RFC 7748, section 6.1, the base64 form of both pairs, round trips through bytes and base64, and the error for each rejected input: private keys of the wrong length, base64 text that is not 44 characters long, base64 that spells the wrong number of bytes, and text that is not canonical base64.
+
+The base64 code is checked against the vectors in RFC 4648, section 10, and its length limit has its own tests. The tests of the byte comparison check its result for equal byte strings, for byte strings that differ at one position and for byte strings of different lengths. The test of `wipe()` checks that it sets every byte of an array to zero.
+
+`scripts/test-signing-check` tests the signing step of `scripts/check` in throwaway Git repositories, with a case for each kind of value it refuses and each kind it accepts. Tests compile and check the usage example in the README. CI runs the same script on macOS for every pull request and every push to `main`.
+
 ## Commits
 
-A commit subject is a conventional commit: a type, a colon and a short imperative summary, such as `fix: reject base64 text of the wrong length`. The type is one of `feat`, `fix`, `docs`, `test`, `refactor`, `build`, `ci` or `chore`. A scope in parentheses after the type is optional, as in `feat(vpncore): add the key pair type`. The summary starts in lower case and has no full stop.
+A commit subject is a sentence in the imperative mood. It starts with a capital letter, has no period and has no type or scope prefix, as in `Reject base64 text of the wrong length`. Names from the code are in backticks.
+
+A pull request has the same sentence as its title. A branch is named for what it does, in lowercase words joined by hyphens, as in `packet-tunnel`, with no prefix and no issue number.
 
 ## The code
 
@@ -30,10 +40,18 @@ Protocol and cryptography code is written from the specification: the WireGuard 
 
 A change comes with tests, and a test's expected values come from a published vector or an independent implementation. A test holds the usage example in the README word for word, so a change to the example is made in `README.md` and in `VPNCore/Tests/VPNCoreTests/ReadmeExampleTests.swift` together.
 
+## What the code protects
+
+`KeyPair` takes its private key from the system random number generator and holds it in swift-tunnel's `X25519PrivateKey`, which cannot be copied and overwrites its 32 bytes with zeros in its deinitializer, immediately before the memory is released. A `KeyPair` cannot be copied either.
+
+`init(privateKeyBase64:)` rejects any text that is not exactly 44 characters before it copies or decodes anything. It then decodes the text, encodes the bytes again and checks that the two texts match. Each buffer in between is overwritten with zeros before it is released, and the comparison takes the same time wherever the texts differ.
+
+`privateKeyBytes` and `privateKeyBase64` return copies that the caller owns and looks after. The caller overwrites a returned array when it is done with it. Pass and read the key as bytes when it must be wiped. A `String` stays in memory until the system reuses it, whether `privateKeyBase64` returned it or `init(privateKeyBase64:)` received it.
+
 ## Security
 
-A vulnerability is reported privately, as `SECURITY.md` describes.
+Report a vulnerability privately, as [`SECURITY.md`](SECURITY.md) describes.
 
-## Licence
+## License
 
-Contributions are made under the Mozilla Public License 2.0, the licence of the repository.
+Contributions are made under the Mozilla Public License 2.0, the license of the repository.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Restructured the README. It opens with one definition, then Learn more, Basic usage, Building, Community and License. Requirements and the signing values moved into Building, and the Security and Tests notes moved to `CONTRIBUTING.md`. The table of parts left the README. License is spelled the American way in the README, the badge and `CONTRIBUTING.md`. `CONTRIBUTING.md` also describes the commit subject, pull request title and branch name.
+- Dated the tunnel in the README from the swift-tunnel roadmap (2027-01-15) with a link to it, put macOS first in the Platforms badge, and gave the package test command its `--package-path`.
 - Copy edited the README, CONTRIBUTING and CHANGELOG.
 - Merged two consecutive guards with the same body in the base64 decoder.
 - Added a manual trigger to CI.
