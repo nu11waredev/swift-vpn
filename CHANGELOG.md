@@ -2,9 +2,8 @@
 
 ## Unreleased
 
-- Restructured the README. It opens with one definition, then Learn more, Basic usage, Building, Community and License. Requirements and the signing values moved into Building, and the Security and Tests notes moved to `CONTRIBUTING.md`. The table of parts left the README. License is spelled the American way in the README, the badge and `CONTRIBUTING.md`. `CONTRIBUTING.md` also describes the commit subject, pull request title and branch name.
-- Dated the tunnel in the README from the swift-tunnel roadmap (2027-01-15) with a link to it, put macOS first in the Platforms badge, and gave the package test command its `--package-path`.
-- Copy edited the README, CONTRIBUTING and CHANGELOG.
+- Reordered the README into a definition, Learn more, Basic usage, Building, Community and License, with the tunnel dated from the swift-tunnel roadmap, macOS first in the Platforms badge, License spelled in American English, and a link to the Discord server in Community.
+- Moved the test notes and the notes on what the code protects into `CONTRIBUTING.md`, which also gives the forms of a commit subject, a pull request title and a branch name.
 - Merged two consecutive guards with the same body in the base64 decoder.
 - Added a manual trigger to CI.
 - Extended the signing step. It refuses a setting written as `KEY: value` or `"KEY": "value"` anywhere on a line, a `CFBundleIdentifier` in a property list that does not start with the prefix, a team identifier under `com.apple.developer.team-identifier`, a team id in an entitlement value, and a file that Git treats as binary and that names a signing setting. `scripts/test-signing-check` has a case for each.
