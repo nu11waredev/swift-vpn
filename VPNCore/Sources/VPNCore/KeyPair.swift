@@ -54,7 +54,9 @@ public struct KeyPair: ~Copyable, Sendable {
   /// - Parameter privateKeyBase64: The private key in standard base64, 44
   ///   characters.
   /// - Throws: `KeyPairError.invalidTextLength` when the text is not exactly 44
-  ///   characters, which is checked before the text is copied or decoded.
+  ///   UTF-8 bytes long, which is checked before the text is copied or decoded.
+  ///   The length is counted in bytes, so a text of 44 characters is rejected
+  ///   for its length when any of them takes more than one byte.
   ///   `KeyPairError.invalidBase64` when the text is not canonical standard
   ///   base64. `KeyPairError.invalidLength` when the bytes it spells are not
   ///   32 bytes long.
@@ -144,8 +146,9 @@ public enum KeyPairError: Error, Equatable {
   /// an X25519 private key. The bytes are the ones given or the ones that the
   /// base64 text spells.
   case invalidLength
-  /// The base64 text is not 44 characters long, the length of 32 bytes in
-  /// standard base64.
+  /// The base64 text is not 44 UTF-8 bytes long, the length of 32 bytes in
+  /// standard base64. Standard base64 is ASCII, so a valid key is also 44
+  /// characters.
   case invalidTextLength
   /// The text is not the canonical standard base64 of RFC 4648, section 4.
   case invalidBase64

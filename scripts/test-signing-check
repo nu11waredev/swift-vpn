@@ -219,10 +219,16 @@ stage pass 'bundle identifier from the prefix in a property list' Info.plist \
   "<key>$bundle_key</key><string>\$(BUNDLE_ID_PREFIX).vpn</string>"
 stage pass 'bundle identifier from the braced prefix in a property list' Info.plist \
   "<key>$bundle_key</key><string>\${BUNDLE_ID_PREFIX}.vpn</string>"
+stage pass 'bundle identifier from the braced identifier setting' Info.plist \
+  "<key>$bundle_key</key><string>\${$identifier}</string>"
 stage pass 'bundle identifier from the identifier setting' Info.plist \
   "<key>$bundle_key</key><string>\$($identifier)</string>"
+stage pass 'bundle identifier from the identifier setting with a suffix' Info.plist \
+  "<key>$bundle_key</key><string>\$($identifier).vpn</string>"
 stage pass 'bundle identifier under the example prefix' Info.plist \
   "<key>$bundle_key</key><string>com.example.vpn</string>"
+stage pass 'bundle identifier that is the example prefix' Info.plist \
+  "<key>$bundle_key</key><string>com.example</string>"
 stage pass 'empty bundle identifier in a property list' Info.plist \
   "<key>$bundle_key</key><string></string>"
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Corrected the documentation of the base64 length limit, which `init(privateKeyBase64:)` counts in UTF-8 bytes and not in characters, and added tests for a text of 44 characters that is 45 bytes long and a text of 43 characters that is 44 bytes long. Corrected the `CFBundleIdentifier` rule in `CONTRIBUTING.md` to the values the signing step accepts, and added test cases for them.
 - Reordered the README into a definition, Learn more, Basic usage, Building, Community and License, with the tunnel dated from the swift-tunnel roadmap, macOS first in the Platforms badge, License spelled in American English, and a link to the Discord server in Community.
 - Moved the test notes and the notes on what the code protects into `CONTRIBUTING.md`, which also gives the forms of a commit subject, a pull request title and a branch name.
 - Merged two consecutive guards with the same body in the base64 decoder.

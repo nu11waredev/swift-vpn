@@ -14,7 +14,7 @@ Signing values belong in `Config/Local.xcconfig`, which Git ignores. The signing
 
 - A development team, a code signing identity other than `-`, or a provisioning profile, set as `KEY = value`, `KEY=value`, `KEY: value` or `"KEY": "value"` anywhere on a line.
 - A bundle identifier prefix other than `com.example`, and a `PRODUCT_BUNDLE_IDENTIFIER` that does not start with the prefix.
-- In a property list or entitlements file: a development team or team identifier under `DevelopmentTeam`, `teamID` or `com.apple.developer.team-identifier`, a `CFBundleIdentifier` that does not start with `$(BUNDLE_ID_PREFIX)` or `com.example` and is not `$(PRODUCT_BUNDLE_IDENTIFIER)`, and any string that is a team id or begins with one, such as `ABCDE12345.com.example`.
+- In a property list or entitlements file: a development team or team identifier under `DevelopmentTeam`, `teamID` or `com.apple.developer.team-identifier`, a `CFBundleIdentifier` that does not start with `$(BUNDLE_ID_PREFIX)` or `$(PRODUCT_BUNDLE_IDENTIFIER)`, or the same names in braces, and is neither `com.example` nor a name under `com.example.`, and any string that is a team id or begins with one, such as `ABCDE12345.com.example`.
 - A file that Git treats as binary and that names one of these settings or keys, because the step cannot read it.
 - A signing file: a provisioning profile, certificate, key, `ExportOptions.plist` or `Config/Local.xcconfig`.
 
@@ -22,7 +22,7 @@ An empty value, a `-` identity and a reference such as `$(inherited)` pass.
 
 ## Tests
 
-The key pair tests check the public keys of the two private keys in RFC 7748, section 6.1, the base64 form of both pairs, round trips through bytes and base64, and the error for each rejected input: private keys of the wrong length, base64 text that is not 44 characters long, base64 that spells the wrong number of bytes, and text that is not canonical base64.
+The key pair tests check the public keys of the two private keys in RFC 7748, section 6.1, the base64 form of both pairs, round trips through bytes and base64, and the error for each rejected input: private keys of the wrong length, base64 text that is not 44 UTF-8 bytes long, base64 that spells the wrong number of bytes, and text that is not canonical base64.
 
 The base64 code is checked against the vectors in RFC 4648, section 10, and its length limit has its own tests. The tests of the byte comparison check its result for equal byte strings, for byte strings that differ at one position and for byte strings of different lengths. The test of `wipe()` checks that it sets every byte of an array to zero.
 
@@ -46,7 +46,7 @@ A change comes with tests, and a test's expected values come from a published ve
 
 `KeyPair` takes its private key from the system random number generator and holds it in swift-tunnel's `X25519PrivateKey`, which cannot be copied and overwrites its 32 bytes with zeros in its deinitializer, immediately before the memory is released. A `KeyPair` cannot be copied either.
 
-`init(privateKeyBase64:)` rejects any text that is not exactly 44 characters before it copies or decodes anything. It then decodes the text, encodes the bytes again and checks that the two texts match. Each buffer in between is overwritten with zeros before it is released, and the comparison takes the same time wherever the texts differ.
+`init(privateKeyBase64:)` rejects any text that is not exactly 44 UTF-8 bytes long before it copies or decodes anything. It then decodes the text, encodes the bytes again and checks that the two texts match. Each buffer in between is overwritten with zeros before it is released, and the comparison takes the same time wherever the texts differ.
 
 `privateKeyBytes` and `privateKeyBase64` return copies that the caller owns and looks after. The caller overwrites a returned array when it is done with it. Pass and read the key as bytes when it must be wiped. A `String` stays in memory until the system reuses it, whether `privateKeyBase64` returned it or `init(privateKeyBase64:)` received it.
 

@@ -36,7 +36,7 @@ let restored = try KeyPair(privateKeyBase64: privateKey)
 | Type | Description |
 | --- | --- |
 | `KeyPair` | `KeyPair` is a private key of 32 random bytes from the system generator, and the public key derived from it with X25519. `init(privateKeyBytes:)` and `init(privateKeyBase64:)` make a pair from a stored private key. `privateKeyBytes`, `publicKeyBytes`, `privateKeyBase64` and `publicKeyBase64` return copies of the keys that the caller owns. |
-| `KeyPairError` | `KeyPairError` is thrown when a key cannot be read. `invalidLength` means the private key is not 32 bytes long, `invalidTextLength` means base64 text is not exactly 44 characters, and `invalidBase64` means the text is not the canonical standard base64 of a byte string. |
+| `KeyPairError` | `KeyPairError` is thrown when a key cannot be read. `invalidLength` means the private key is not 32 bytes long, `invalidTextLength` means base64 text is not exactly 44 UTF-8 bytes long, and `invalidBase64` means the text is not the canonical standard base64 of a byte string. |
 
 ## Building
 

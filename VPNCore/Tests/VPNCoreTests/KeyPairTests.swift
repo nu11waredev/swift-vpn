@@ -134,7 +134,7 @@ struct KeyPairTests {
   /// The base64 of 32 zero bytes: 43 "A" and one "=".
   static let validText = String(repeating: "A", count: 43) + "="
 
-  /// Texts that are shorter or longer than 44 characters, none of them long.
+  /// Texts that are shorter or longer than 44 UTF-8 bytes, none of them long.
   static let textsOfTheWrongLength: [String] = [
     // Empty.
     "",
@@ -148,8 +148,30 @@ struct KeyPairTests {
   ]
 
   @Test(arguments: Self.textsOfTheWrongLength)
-  func `base64 that is not 44 characters is rejected`(text: String) {
+  func `base64 that is not 44 UTF-8 bytes is rejected`(text: String) {
     #expect(throws: KeyPairError.invalidTextLength) {
+      _ = try KeyPair(privateKeyBase64: text)
+    }
+  }
+
+  /// The length is counted in UTF-8 bytes, not characters. "é" is one character
+  /// and two bytes, so 43 "A" and "é" is 44 characters and 45 bytes.
+  @Test func `text of 44 characters that is longer in UTF-8 is rejected for its length`() {
+    let text = String(repeating: "A", count: 43) + "\u{E9}"
+    #expect(text.count == 44)
+    #expect(text.utf8.count == 45)
+    #expect(throws: KeyPairError.invalidTextLength) {
+      _ = try KeyPair(privateKeyBase64: text)
+    }
+  }
+
+  /// 42 "A" and "é" is 43 characters and 44 bytes, so it passes the length check
+  /// and fails as text that is not base64.
+  @Test func `text of 44 UTF-8 bytes that is shorter in characters is not base64`() {
+    let text = String(repeating: "A", count: 42) + "\u{E9}"
+    #expect(text.count == 43)
+    #expect(text.utf8.count == 44)
+    #expect(throws: KeyPairError.invalidBase64) {
       _ = try KeyPair(privateKeyBase64: text)
     }
   }
