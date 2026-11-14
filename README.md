@@ -1,11 +1,11 @@
-# VPN
+# swift-vpn
 
 [![CI](https://img.shields.io/github/actions/workflow/status/nu11waredev/swift-vpn/ci.yml?branch=main&label=CI)](https://github.com/nu11waredev/swift-vpn/actions/workflows/ci.yml)
 [![Swift 6.4](https://img.shields.io/badge/Swift-6.4-F05138?logo=swift&logoColor=white)](https://www.swift.org)
 [![Platforms](https://img.shields.io/badge/Platforms-macOS%20%7C%20iOS-0969DA)](VPNCore/Package.swift)
 [![License MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-8250DF)](LICENSE)
 
-VPN is a WireGuard VPN client for iOS and macOS, written in Swift and SwiftUI.
+swift-vpn is a WireGuard VPN client for iOS and macOS, written in Swift and SwiftUI.
 
 - [Learn more](#learn-more)
 - [Basic usage](#basic-usage)
