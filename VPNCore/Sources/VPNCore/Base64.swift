@@ -11,9 +11,15 @@
 /// no branch on the sextet values. The code does branch on lengths and on where
 /// padding sits, which are not secret.
 enum Base64 {
+  /// The length of the standard base64 of `byteCount` bytes: a group of 4
+  /// characters for each 3 bytes, the last group padded.
+  static func encodedLength(forByteCount byteCount: Int) -> Int {
+    (byteCount + 2) / 3 * 4
+  }
+
   /// The standard base64 of `bytes`, as ASCII bytes.
   static func encode(_ bytes: Span<UInt8>) -> [UInt8] {
-    var text = [UInt8](repeating: 0, count: (bytes.count + 2) / 3 * 4)
+    var text = [UInt8](repeating: 0, count: encodedLength(forByteCount: bytes.count))
     var group = 0
     while group * 3 < bytes.count {
       let start = group * 3

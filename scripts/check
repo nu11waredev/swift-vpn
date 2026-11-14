@@ -5,15 +5,36 @@
 
 # Tests the package, builds the app for iOS Simulator and macOS without code
 # signing, lints the source and refuses tracked signing values. The pre-push
-# hook and CI run this. `scripts/check signing` runs the signing step alone,
-# and `scripts/test-signing-check` tests that step.
+# hook and CI run this. On Linux it runs the tests and the signing step only.
+# `scripts/check signing` runs the signing step alone, and
+# `scripts/test-signing-check` tests that step.
+#
+# `--pushed` makes the step read the commits a push sends as well as the index.
+# It reads the lines git gives a pre-push hook on standard input, which this
+# script takes before it starts anything that could read them.
 set -euo pipefail
+
+mode=all
+pushed=0
+pushed_input=
+for argument in "$@"; do
+  case "$argument" in
+    signing) mode=signing ;;
+    --pushed) pushed=1 ;;
+    *)
+      print -u2 -r -- "usage: scripts/check [signing] [--pushed]"
+      exit 2
+      ;;
+  esac
+done
+if (( pushed )); then pushed_input="$(cat)"; fi
 
 cd "${0:A:h:h}"
 
 # What the signing step looks for. It reads the index, so a staged value is
-# found whatever the working tree holds, and it fails when git fails, so an
-# error cannot pass for a clean tree.
+# found whatever the working tree holds, and with `--pushed` every commit being
+# pushed, so a value that was committed and then removed is found too. It fails
+# when git fails, so an error cannot pass for a clean tree.
 #
 # A line assigns to a setting as `KEY = value`, `KEY[sdk=*][arch=*] = value`,
 # the project file's `KEY = "value";`, a command line's `KEY=value`, or
@@ -28,6 +49,9 @@ setting_pattern[prefix]='bundle_id_prefix'
 setting_pattern[identifier]='product_bundle_identifier'
 setting_pattern[identity]='code_sign_identity'
 setting_pattern[profile]='provisioning_profile(_specifier)?'
+# A line that names any setting, joined for a quick test before a line is read
+# in full.
+any_setting="${(j:|:)setting_pattern}"
 
 # What a property list holds under these keys: a team, and a bundle identifier.
 # A file git treats as binary is refused when it names any setting or key.
@@ -130,96 +154,284 @@ index_query() {
   fi
 }
 
-# Fails when a tracked file carries a value that belongs on the signing
-# machine: a development team, a bundle identifier prefix other than
-# com.example, a bundle identifier that skips the prefix, a signing identity or
-# provisioning profile, a team id in a property list, or a signing asset such
-# as a key or certificate. A file that git treats as binary and that names a
-# signing setting is refused, because the step cannot read it.
-check_signing_values() {
+# A source is `index` or the id of a commit. This runs `git grep` over it, with
+# the options and patterns given, and leaves the output in REPLY. A commit's
+# output names each file as `<commit>:<file>`, and `source_prefix` is that
+# prefix, empty for the index.
+source_grep() {
+  local source="$1"
+  shift
+  if [[ "$source" == index ]]; then
+    index_query git grep --cached "$@" -- .
+  else
+    index_query git grep "$@" "$source" -- .
+  fi
+}
+
+# The names of the tracked files of a source, separated by NUL.
+source_files() {
+  if [[ "$1" == index ]]; then
+    index_query git ls-files -z
+  else
+    index_query git ls-tree -r -z --name-only --full-tree "$1"
+  fi
+}
+
+# The text of a file of a source, written to the path given, so that bytes git
+# treats as binary survive.
+source_blob() {
+  local source="$1" file="$2" target="$3" spec
+  if [[ "$source" == index ]]; then spec=":${file}"; else spec="${source}:${file}"; fi
+  git cat-file blob "$spec" > "$target" || {
+    print -u2 -r -- "signing check: cannot read ${file}"
+    return 1
+  }
+}
+
+# A signing asset or the local config, by name. Case is ignored for all but the
+# local config.
+asset_globs=(
+  '(#i)*.mobileprovision' '(#i)*.provisionprofile' '(#i)*.p12' '(#i)*.pfx'
+  '(#i)*.cer' '(#i)*.crt' '(#i)*.der' '(#i)*.pem' '(#i)*.key' '(#i)*.p8'
+  '(#i)*exportoptions.plist' 'Config/Local.xcconfig'
+)
+
+# The path of a temporary file that holds one blob at a time, removed when the
+# step ends.
+blob_path=
+
+# Sets REPLY to the text of the UTF-16 file at `$1` in the encoding named by
+# `$2`, in UTF-8 and without its byte order mark, and fails when the file is
+# not valid in that encoding.
+decode_utf16() {
+  REPLY="$(iconv -f "$2" -t UTF-8 "$1" 2>/dev/null)" || return 1
+  REPLY="${REPLY#$'\xef\xbb\xbf'}"
+}
+
+# Prints a reason for each value on a line of a text, with the line's number,
+# one text at a time. `$1` names the file in the output, `$2` is its text.
+text_problems() {
   setopt local_options extended_glob
-  local -i failed=0
-  local entry file number line problem content key plist_key value rest
-  local -a plists grep_args binary_args
+  local label="$1" line problem
+  local -i number=0 count
+  for line in "${(@f)2}"; do
+    number+=1
+    line="${line%$'\r'}"
+    [[ "${line:l}" =~ $any_setting ]] || continue
+    for problem in "${(@f)$(line_problems "$line")}"; do
+      [[ -n "$problem" ]] || continue
+      print -u2 -r -- "${label}:${number}: ${problem}"
+      count+=1
+    done
+  done
+  return $(( count > 0 ))
+}
+
+# Prints a reason for each value in a property list that belongs on the signing
+# machine. `$1` names the file in the output, `$2` is its text. A property list
+# holds a key and its value on separate lines, and an entitlement can hold a
+# team id in any string.
+plist_problems() {
+  setopt local_options extended_glob
+  local label="$1" rest="$2" plist_key value
+  local -i found=0
+  while [[ "$rest" =~ $plist_pair ]]; do
+    rest="${rest:$MEND}"
+    plist_key="${${${match[1]##[[:space:]]#}%%[[:space:]]#}:l}"
+    value="${${match[2]##[[:space:]]#}%%[[:space:]]#}"
+    [[ -n "$value" ]] || continue
+    if [[ "$plist_key" =~ ^${plist_team_keys}$ ]]; then
+      [[ ! "$value" =~ $reference_only ]] || continue
+      print -u2 -r -- "${label}: sets a development team in a property list"
+      found=1
+    elif [[ "$plist_key" == cfbundleidentifier ]] \
+      && [[ "$value" != (\$\(|\$\{)(BUNDLE_ID_PREFIX|PRODUCT_BUNDLE_IDENTIFIER)(\)|\})* ]] \
+      && [[ "$value" != com.example(|.*) ]]; then
+      print -u2 -r -- "${label}: sets a bundle identifier that does not start with the prefix"
+      found=1
+    fi
+  done
+  rest="$2"
+  while [[ "$rest" =~ $plist_string ]]; do
+    rest="${rest:$MEND}"
+    value="${${match[1]##[[:space:]]#}%%[[:space:]]#}"
+    if [[ "$value" =~ $team_id_value && "$value" == *[A-Z]* ]]; then
+      print -u2 -r -- "${label}: has a team id in a property list value"
+      found=1
+    fi
+  done
+  return $found
+}
+
+# Scans one source, the index or a commit, and sets `failed` when it finds a
+# value that belongs on the signing machine. It returns 1 only when git or a
+# file cannot be read, which stops the step. A file that git treats as binary
+# and that names a signing setting is refused, because the step cannot read it,
+# unless it is UTF-16, which the step decodes and reads as text.
+scan_source() {
+  setopt local_options extended_glob
+  local source="$1" prefix label entry file number line problem content key
+  local -a encoding
+  local bom pattern
+  local -a grep_args binary_args binary_files
   local -A text_files
+  if [[ "$source" == index ]]; then
+    prefix=
+    label=
+  else
+    prefix="${source}:"
+    label="${source[1,12]}:"
+  fi
+
+  # One line at a time.
+  for key in $setting_keys; do grep_args+=(-e "${setting_pattern[$key]}"); done
+  source_grep "$source" -nIiE $grep_args
+  for entry in "${(@f)REPLY}"; do
+    [[ -n "$entry" ]] || continue
+    entry="${entry#$prefix}"
+    file="${entry%%:*}"
+    number="${${entry#*:}%%:*}"
+    line="${${entry#*:}#*:}"
+    for problem in "${(@f)$(line_problems "$line")}"; do
+      [[ -n "$problem" ]] || continue
+      print -u2 -r -- "${label}${file}:${number}: ${problem}"
+      failed=1
+    done
+  done
+
+  # A file git treats as binary is skipped by the search above, so it is found
+  # here. A UTF-16 file is decoded and read as text. Any other is refused when
+  # it names a setting or a key.
+  for key in $setting_keys; do binary_args+=(-e "${setting_pattern[$key]}"); done
+  for key in $binary_patterns; do binary_args+=(-e "$key"); done
+  source_grep "$source" -lzIiE $binary_args
+  for file in "${(@0)REPLY}"; do text_files[${file#$prefix}]=1; done
+  source_grep "$source" -lziE $binary_args
+  for file in "${(@0)REPLY}"; do
+    file="${file#$prefix}"
+    [[ -n "$file" && -z "${text_files[$file]-}" ]] || continue
+    print -u2 -r -- "${label}${file}: is a binary file that names a signing setting, so it cannot be read"
+    failed=1
+  done
+
+  # Every file with a NUL byte is a candidate for UTF-16, whatever it names.
+  # With a byte order mark the encoding is known. Without one, the file is read
+  # in each byte order, since a file can decode in both.
+  source_grep "$source" -lza -e ''
+  local -A everything
+  for file in "${(@0)REPLY}"; do everything[${file#$prefix}]=1; done
+  source_grep "$source" -lzI -e ''
+  for file in "${(@0)REPLY}"; do unset "everything[${file#$prefix}]"; done
+  for file in ${(k)everything}; do
+    source_blob "$source" "$file" "$blob_path" || return 1
+    bom="$(head -c 2 "$blob_path" | od -An -tx1 | tr -d ' \n')"
+    case "$bom" in
+      fffe) encoding=(UTF-16LE) ;;
+      feff) encoding=(UTF-16BE) ;;
+      *) encoding=(UTF-16LE UTF-16BE) ;;
+    esac
+    local decoded=0
+    for key in $encoding; do
+      decode_utf16 "$blob_path" "$key" || continue
+      decoded=1
+      content="$REPLY"
+      text_problems "${label}${file}" "$content" || failed=1
+      if [[ "$content" == *'<key>'* ]]; then
+        plist_problems "${label}${file}" "$content" || failed=1
+      fi
+    done
+    if [[ "$bom" == (fffe|feff) ]] && (( ! decoded )); then
+      print -u2 -r -- "${label}${file}: is a UTF-16 file that cannot be decoded, so it cannot be read"
+      failed=1
+    fi
+  done
+
+  # A property list holds a key and its value on separate lines, and an
+  # entitlement can hold a team id in any string.
+  source_grep "$source" -lzIE '<key>'
+  for file in "${(@0)REPLY}"; do
+    file="${file#$prefix}"
+    [[ -n "$file" ]] || continue
+    source_blob "$source" "$file" "$blob_path" || return 1
+    content="$(<"$blob_path")"
+    plist_problems "${label}${file}" "$content" || failed=1
+  done
+
+  # Signing assets and the local config stay on the machine that signs.
+  source_files "$source"
+  for file in "${(@0)REPLY}"; do
+    [[ -n "$file" ]] || continue
+    for pattern in $asset_globs; do
+      if [[ "$file" == ${~pattern} ]]; then
+        print -u2 -r -- "${label}${file}: is a signing asset or the local config"
+        failed=1
+        break
+      fi
+    done
+  done
+}
+
+# Sets `pushed_commits` to the commits a push sends, from the lines git gives a
+# pre-push hook: the local ref, the local id, the remote ref and the remote id.
+# A ref that is deleted sends none. A ref that is new, or one whose remote id
+# this clone does not have, sends every commit that no remote-tracking branch
+# holds. Any other sends the commits after the remote id. A line git cannot
+# have sent, or a commit that cannot be listed, fails the step.
+list_pushed_commits() {
+  local lref lsha rref rsha extra commit commits
+  local -a range
+  local -A seen
+  pushed_commits=()
+  while read -r lref lsha rref rsha extra; do
+    [[ -n "$lref$lsha$rref$rsha" ]] || continue
+    if [[ -z "$rsha" || -n "$extra" || ! "$lsha$rsha" =~ ^[0-9a-f]+$ ]]; then
+      print -u2 -r -- 'signing check: a line of the pushed refs is not in the form git sends a pre-push hook'
+      return 1
+    fi
+    [[ "$lsha" =~ ^0+$ ]] && continue
+    if [[ "$rsha" =~ ^0+$ ]] || ! git cat-file -e "${rsha}^{commit}" 2>/dev/null; then
+      range=("$lsha" --not --remotes)
+    else
+      range=("${rsha}..${lsha}")
+    fi
+    commits="$(git rev-list $range 2>/dev/null)" || {
+      print -u2 -r -- "signing check: cannot list the commits pushed to ${rref}"
+      return 1
+    }
+    for commit in "${(@f)commits}"; do
+      [[ -n "$commit" && -z "${seen[$commit]-}" ]] || continue
+      seen[$commit]=1
+      pushed_commits+=("$commit")
+    done
+  done <<< "$pushed_input"
+}
+
+# Fails when the index, or a commit being pushed, carries a value that belongs
+# on the signing machine: a development team, a bundle identifier prefix other
+# than com.example, a bundle identifier that skips the prefix, a signing
+# identity or provisioning profile, a team id in a property list, or a signing
+# asset such as a key or certificate. Text in UTF-16 is read like any other. A
+# file that git treats as binary, that is not UTF-16 and that names a signing
+# setting is refused, because the step cannot read it.
+check_signing_values() {
+  local -i failed=0
+  local source
+  local -a pushed_commits
 
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     print -u2 'signing check: not inside a git repository, so nothing can be checked'
     return 1
   fi
 
-  # One line at a time, from the index.
-  for key in $setting_keys; do grep_args+=(-e "${setting_pattern[$key]}"); done
-  index_query git grep --cached -nIiE $grep_args -- .
-  for entry in "${(@f)REPLY}"; do
-    [[ -n "$entry" ]] || continue
-    file="${entry%%:*}"
-    number="${${entry#*:}%%:*}"
-    line="${${entry#*:}#*:}"
-    for problem in "${(@f)$(line_problems "$line")}"; do
-      [[ -n "$problem" ]] || continue
-      print -u2 -r -- "${file}:${number}: ${problem}"
-      failed=1
-    done
-  done
+  if (( pushed )); then
+    list_pushed_commits || return 1
+  fi
+  blob_path="$(mktemp "${TMPDIR:-/tmp}/signing-check.XXXXXX")" || return 1
+  trap 'rm -f "$blob_path"' EXIT
 
-  # A file git treats as binary is skipped by the search above, so it is found
-  # here and refused when it names a setting or a key.
-  for key in $setting_keys; do binary_args+=(-e "${setting_pattern[$key]}"); done
-  for key in $binary_patterns; do binary_args+=(-e "$key"); done
-  index_query git grep --cached -lzIiE $binary_args -- .
-  for file in "${(@0)REPLY}"; do text_files[$file]=1; done
-  index_query git grep --cached -lziE $binary_args -- .
-  for file in "${(@0)REPLY}"; do
-    [[ -n "$file" && -z "${text_files[$file]-}" ]] || continue
-    print -u2 -r -- "${file}: is a binary file that names a signing setting, so it cannot be read"
-    failed=1
-  done
-
-  # A property list holds a key and its value on separate lines, and an
-  # entitlement can hold a team id in any string.
-  index_query git grep --cached -lzIE '<key>' -- .
-  plists=("${(@0)REPLY}")
-  for file in $plists; do
-    [[ -n "$file" ]] || continue
-    content="$(git show ":${file}")" || { print -u2 "signing check: cannot read ${file}"; return 1; }
-    rest="$content"
-    while [[ "$rest" =~ $plist_pair ]]; do
-      rest="${rest:$MEND}"
-      plist_key="${${${match[1]##[[:space:]]#}%%[[:space:]]#}:l}"
-      value="${${match[2]##[[:space:]]#}%%[[:space:]]#}"
-      [[ -n "$value" ]] || continue
-      if [[ "$plist_key" =~ ^${plist_team_keys}$ ]]; then
-        [[ ! "$value" =~ $reference_only ]] || continue
-        print -u2 -r -- "${file}: sets a development team in a property list"
-        failed=1
-      elif [[ "$plist_key" == cfbundleidentifier ]] \
-        && [[ "$value" != (\$\(|\$\{)(BUNDLE_ID_PREFIX|PRODUCT_BUNDLE_IDENTIFIER)(\)|\})* ]] \
-        && [[ "$value" != com.example(|.*) ]]; then
-        print -u2 -r -- "${file}: sets a bundle identifier that does not start with the prefix"
-        failed=1
-      fi
-    done
-    rest="$content"
-    while [[ "$rest" =~ $plist_string ]]; do
-      rest="${rest:$MEND}"
-      value="${${match[1]##[[:space:]]#}%%[[:space:]]#}"
-      if [[ "$value" =~ $team_id_value && "$value" == *[A-Z]* ]]; then
-        print -u2 -r -- "${file}: has a team id in a property list value"
-        failed=1
-      fi
-    done
-  done
-
-  # Signing assets and the local config stay on the machine that signs.
-  index_query git ls-files -z -- \
-    ':(icase)*.mobileprovision' ':(icase)*.provisionprofile' ':(icase)*.p12' \
-    ':(icase)*.pfx' ':(icase)*.cer' ':(icase)*.crt' ':(icase)*.der' ':(icase)*.pem' \
-    ':(icase)*.key' ':(icase)*.p8' ':(icase)*exportoptions.plist' 'Config/Local.xcconfig'
-  for file in "${(@0)REPLY}"; do
-    [[ -n "$file" ]] || continue
-    print -u2 -r -- "${file}: is a signing asset or the local config"
-    failed=1
+  scan_source index || return 1
+  for source in $pushed_commits; do
+    scan_source "$source" || return 1
   done
 
   if (( failed )); then
@@ -228,7 +440,7 @@ check_signing_values() {
   fi
 }
 
-if [[ "${1:-}" == signing ]]; then
+if [[ "$mode" == signing ]]; then
   check_signing_values
   exit
 fi
@@ -239,23 +451,28 @@ scripts/test-signing-check
 print -- '==> Package tests'
 swift test --package-path VPNCore
 
-for platform in 'iOS Simulator' macOS; do
-  print -- "==> Build for ${platform}"
-  xcodebuild build \
-    -quiet \
-    -project VPN.xcodeproj \
-    -scheme VPN \
-    -destination "generic/platform=${platform}" \
-    -derivedDataPath build/DerivedData \
-    CODE_SIGNING_ALLOWED=NO
-done
+# The app builds and the format lint run on macOS. On Linux the check runs the
+# signing tests, the package tests, which cover the Linux branch of `wipe`, and
+# the signing step.
+if [[ "$(uname -s)" == Darwin ]]; then
+  for platform in 'iOS Simulator' macOS; do
+    print -- "==> Build for ${platform}"
+    xcodebuild build \
+      -quiet \
+      -project VPN.xcodeproj \
+      -scheme VPN \
+      -destination "generic/platform=${platform}" \
+      -derivedDataPath build/DerivedData \
+      CODE_SIGNING_ALLOWED=NO
+  done
 
-print -- '==> SwiftFormat'
-if ! command -v swiftformat >/dev/null 2>&1; then
-  print -u2 'swiftformat is not installed.'
-  exit 1
+  print -- '==> SwiftFormat'
+  if ! command -v swiftformat >/dev/null 2>&1; then
+    print -u2 'swiftformat is not installed.'
+    exit 1
+  fi
+  swiftformat --lint . --exclude build,.build
 fi
-swiftformat --lint . --exclude build,.build
 
 print -- '==> Signing values'
 check_signing_values

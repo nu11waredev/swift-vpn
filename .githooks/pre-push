@@ -3,4 +3,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-exec "$(git rev-parse --show-toplevel)/scripts/check"
+# The check reads the refs git sends this hook on standard input, so it can read
+# the commits being pushed.
+exec "$(git rev-parse --show-toplevel)/scripts/check" --pushed

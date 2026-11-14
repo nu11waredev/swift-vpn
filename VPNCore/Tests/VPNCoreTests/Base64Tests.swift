@@ -96,4 +96,23 @@ struct Base64Tests {
     #expect(Base64.decodeCanonical(empty.span, maximumLength: 0) == [])
     #expect(Base64.decodeCanonical(one.span, maximumLength: 0) == nil)
   }
+
+  @Test(arguments: rfc4648Vectors)
+  func `the encoded length matches the RFC 4648 vectors`(plain: String, encoded: String) {
+    #expect(Base64.encodedLength(forByteCount: plain.utf8.count) == encoded.utf8.count)
+  }
+
+  @Test(arguments: [0, 1, 2, 3, 4, 31, 32, 33, 48, 100])
+  func `the encoded length is the length of the text that is encoded`(count: Int) {
+    let bytes = [UInt8](repeating: 0xA5, count: count)
+    #expect(Base64.encodedLength(forByteCount: count) == Base64.encode(bytes.span).count)
+  }
+
+  /// The WireGuard paper, section 1, writes a key of 32 bytes in 44 characters.
+  /// The limit that `init(privateKeyBase64:)` applies is this one length.
+  @Test func `a key is 44 characters of base64`() {
+    #expect(KeyPair.keyLength == 32)
+    #expect(KeyPair.base64Length == 44)
+    #expect(KeyPair.base64Length == Base64.encodedLength(forByteCount: KeyPair.keyLength))
+  }
 }

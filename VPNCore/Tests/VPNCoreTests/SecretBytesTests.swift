@@ -45,4 +45,13 @@ struct SecretBytesTests {
     wipe(&bytes)
     #expect(bytes.isEmpty)
   }
+
+  /// A length that is not a multiple of a machine word, and one that is, so that
+  /// both the tail and the body of a platform's wipe are written.
+  @Test(arguments: [1, 7, 8, 31, 32, 33, 4096])
+  func `wiping overwrites arrays of every size`(count: Int) {
+    var bytes = [UInt8](repeating: 0xA5, count: count)
+    wipe(&bytes)
+    #expect(bytes == [UInt8](repeating: 0, count: count))
+  }
 }

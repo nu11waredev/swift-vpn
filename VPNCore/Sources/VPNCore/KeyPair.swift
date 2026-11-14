@@ -15,10 +15,14 @@ import X25519
 /// pair ends. A value that leaves the pair, such as `privateKeyBytes` or
 /// `privateKeyBase64`, is a copy that the caller owns and must look after.
 public struct KeyPair: ~Copyable, Sendable {
-  /// The length of a key in standard base64. Ten groups of 3 bytes and a last
-  /// group of 2 bytes make 11 groups of 4 characters, the last with one padding
-  /// mark.
-  private static let base64Length = 44
+  /// The length of a key in bytes.
+  static let keyLength = 32
+
+  /// The length of a key in standard base64, 44 characters: ten groups of 3
+  /// bytes and a last group of 2 bytes make 11 groups of 4 characters, the last
+  /// with one padding mark. This is the one place the limit is defined, and the
+  /// check on the text and the decoder's limit both read it.
+  static let base64Length = Base64.encodedLength(forByteCount: keyLength)
 
   /// The private key, which RFC 7748 calls the scalar.
   private let scalar: X25519PrivateKey

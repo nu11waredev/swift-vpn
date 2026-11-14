@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Closed the gaps in the signing step. `scripts/check --pushed`, which the pre-push hook runs, reads every commit being pushed as well as the index, so a value that was committed and then removed is refused. The step reads UTF-16 text files, with and without a byte order mark, in either byte order, and refuses a UTF-16 file with a byte order mark that cannot be decoded. `scripts/test-signing-check` has cases for each.
+- Defined the base64 length limit once, as `KeyPair.base64Length`, which is computed from the key length with `Base64.encodedLength(forByteCount:)`.
+- Gave `wipe()` a Linux branch that calls `explicit_bzero`, with tests for arrays of several sizes, and added a CI job that runs `scripts/check` on Linux in a Swift 6.4 container. There it runs the signing tests, the package tests and the signing step, and skips the app builds and the format lint, which need macOS.
 - Corrected the documentation of the base64 length limit, which `init(privateKeyBase64:)` counts in UTF-8 bytes and not in characters, and added tests for a text of 44 characters that is 45 bytes long and a text of 43 characters that is 44 bytes long. Corrected the `CFBundleIdentifier` rule in `CONTRIBUTING.md` to the values the signing step accepts, and added test cases for them.
 - Reordered the README into a definition, Learn more, Basic usage, Building, Community and License, with the tunnel dated from the swift-tunnel roadmap, macOS first in the Platforms badge, License spelled in American English, and a link to the Discord server in Community.
 - Moved the test notes and the notes on what the code protects into `CONTRIBUTING.md`, which also gives the forms of a commit subject, a pull request title and a branch name.

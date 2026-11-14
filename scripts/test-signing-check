@@ -5,7 +5,9 @@
 
 # Tests `scripts/check signing`. Each case stages one file in a throwaway git
 # repository under $TMPDIR, runs the step there and compares its exit status
-# with the one the case expects. The repository holds a copy of
+# with the one the case expects. The cases that read pushed commits give the
+# step the lines git sends a pre-push hook, as `scripts/check signing --pushed`
+# reads them. The repository holds a copy of
 # scripts/check, so the step also reads its own source, as it does in a real
 # checkout. The setting names are held in variables so that no line of this
 # file assigns to one, and the step can scan this file as it scans the rest.
@@ -14,6 +16,9 @@ set -euo pipefail
 # The settings come from the repository under test, never from the user's own
 # git configuration.
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+# Commits are made with plumbing, which still wants an identity.
+export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
+export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
 
 root="${0:A:h:h}"
 sandbox="$(mktemp -d "${TMPDIR:-/tmp}/signing-check.XXXXXX")"
@@ -43,9 +48,15 @@ cp "$root/scripts/check" "$repo/scripts/check"
 total=0
 failures=0
 
+# What the step reads on standard input and which arguments it gets after
+# `signing`. A case that reads pushed commits sets both, and `verdict` clears
+# them afterwards.
+step_input=/dev/null
+step_args=()
+
 # Runs the step in `directory` and reports whether it passed.
 run_step() {
-  (cd "$1" && scripts/check signing) >/dev/null 2>&1 && return 0 || return 1
+  (cd "$1" && scripts/check signing $step_args < "$step_input") >/dev/null 2>&1 && return 0 || return 1
 }
 
 # Compares the outcome with what the case expects.
@@ -53,6 +64,8 @@ verdict() {
   local expected="$1" name="$2" outcome=pass
   shift 2
   run_step "$@" || outcome=fail
+  step_input=/dev/null
+  step_args=()
   total=$(( total + 1 ))
   if [[ "$outcome" != "$expected" ]]; then
     print -u2 -r -- "FAIL: ${name}: expected ${expected}, got ${outcome}"
@@ -77,6 +90,24 @@ stage_bytes() {
   git -C "$repo" read-tree --empty
   mkdir -p "$repo/${file:h}"
   printf '%b' "$format" > "$repo/$file"
+  git -C "$repo" add -f scripts/check "$file"
+  verdict "$expected" "$name" "$repo"
+}
+
+# stage_utf16 EXPECTED NAME PATH ENCODING CONTENT: like stage, with the content
+# written as UTF-16. ENCODING is le or be for no byte order mark, le-bom or
+# be-bom for one.
+stage_utf16() {
+  local expected="$1" name="$2" file="$3" encoding="$4" content="$5"
+  git -C "$repo" read-tree --empty
+  mkdir -p "$repo/${file:h}"
+  {
+    case $encoding in
+      le-bom) printf '\377\376' ;;
+      be-bom) printf '\376\377' ;;
+    esac
+    print -r -- "$content" | iconv -f UTF-8 -t "UTF-16${${encoding%-bom}:u}"
+  } > "$repo/$file"
   git -C "$repo" add -f scripts/check "$file"
   verdict "$expected" "$name" "$repo"
 }
@@ -260,6 +291,27 @@ stage_bytes fail 'team id key in a binary property list' Info.plist "bplist00\\0
 stage_bytes fail 'team identifier key in a binary entitlements file' App.entitlements "bplist00\\0$team_key"
 stage_bytes pass 'binary file that names no signing setting' Icon.png 'PNG\\0data'
 
+# --- Files written as UTF-16 -------------------------------------------------
+
+for encoding in le be le-bom be-bom; do
+  stage_utf16 fail "team in UTF-16 (${encoding})" Config/A.xcconfig $encoding "$team = ABC123"
+  stage_utf16 fail "prefix in UTF-16 (${encoding})" Config/A.xcconfig $encoding "$prefix = com.acme"
+  stage_utf16 fail "team in UTF-16 with Windows line endings (${encoding})" Config/A.xcconfig $encoding \
+    $'// Signing\r\n'"$team = ABC123"$'\r\n'
+  stage_utf16 fail "team in a UTF-16 property list (${encoding})" App.plist $encoding \
+    $'<dict>\n\t<key>'"$plist_team"$'</key>\n\t<string>ABC123</string>\n</dict>'
+  stage_utf16 fail "team id in a UTF-16 entitlement (${encoding})" App.entitlements $encoding \
+    $'<key>some-group</key>\n<string>'"$team_value"$'.com.example</string>'
+  stage_utf16 pass "empty team in UTF-16 (${encoding})" Config/A.xcconfig $encoding "$team ="
+  stage_utf16 pass "commented out team in UTF-16 (${encoding})" Config/A.xcconfig $encoding "// $team = ABC123"
+  stage_utf16 pass "prefix com.example in UTF-16 (${encoding})" Config/A.xcconfig $encoding "$prefix = com.example"
+  stage_utf16 pass "UTF-16 property list without a team (${encoding})" App.plist $encoding \
+    $'<key>CFBundleName</key>\n<string>VPN</string>'
+done
+# A byte order mark and then a lone high surrogate: the step cannot read it.
+stage_bytes fail 'UTF-16 file with a byte order mark that cannot be decoded' Config/A.xcconfig '\0377\0376\0000\0330'
+stage_bytes fail 'big-endian UTF-16 file with a byte order mark that cannot be decoded' Config/A.xcconfig '\0376\0377\0330\0000'
+
 # --- Signing assets ----------------------------------------------------------
 
 for asset in a.mobileprovision a.provisionprofile a.p12 a.pfx a.cer a.crt a.der a.pem a.key a.p8 \
@@ -284,6 +336,94 @@ print -r -- "$team =" > "$repo/Config/Staged.xcconfig"
 git -C "$repo" add -f scripts/check Config/Staged.xcconfig
 print -r -- "$team = ABC123" > "$repo/Config/Staged.xcconfig"
 verdict pass 'untracked edit in the working tree' "$repo"
+
+# --- The commits being pushed ------------------------------------------------
+
+zero=0000000000000000000000000000000000000000
+
+# commit PARENT: commits the index and prints the new commit's id. The branch
+# is not moved, so the index and the commits stay apart.
+commit() {
+  local parent="${1:-}" tree
+  tree="$(git -C "$repo" write-tree)"
+  if [[ -n "$parent" ]]; then
+    git -C "$repo" commit-tree "$tree" -p "$parent" -m case
+  else
+    git -C "$repo" commit-tree "$tree" -m case
+  fi
+}
+
+# push_lines LOCAL REMOTE: the line git sends a pre-push hook for one ref.
+push_lines() {
+  print -r -- "refs/heads/main $1 refs/heads/main $2"
+}
+
+# pushed EXPECTED NAME REPO: runs the step the way the hook does.
+pushed() {
+  local expected="$1" name="$2"
+  step_input="$sandbox/pre-push-input"
+  step_args=(--pushed)
+  verdict "$expected" "$name" "$3"
+}
+
+# A value that was committed and then removed again is gone from the index and
+# the working tree, but the commit that added it is still pushed.
+git -C "$repo" read-tree --empty
+print -r -- "$team = ABC123" > "$repo/Config/Pushed.xcconfig"
+git -C "$repo" add -f scripts/check Config/Pushed.xcconfig
+added="$(commit)"
+print -r -- "$team =" > "$repo/Config/Pushed.xcconfig"
+git -C "$repo" add -f Config/Pushed.xcconfig
+removed="$(commit "$added")"
+print -r -- '// clean' > "$repo/Config/Pushed.xcconfig"
+git -C "$repo" add -f Config/Pushed.xcconfig
+clean="$(commit "$removed")"
+
+verdict pass 'value committed and removed, index only' "$repo"
+push_lines "$removed" "$zero" > "$sandbox/pre-push-input"
+pushed fail 'value committed and then removed, new branch' "$repo"
+push_lines "$removed" "$added" > "$sandbox/pre-push-input"
+pushed pass 'value committed earlier than the pushed range' "$repo"
+push_lines "$clean" "$added" > "$sandbox/pre-push-input"
+pushed pass 'range that starts after the value was committed' "$repo"
+push_lines "$clean" "$zero" > "$sandbox/pre-push-input"
+pushed fail 'value in the history of a new branch' "$repo"
+{ push_lines "$zero" "$added"; push_lines "$clean" "$zero"; } > "$sandbox/pre-push-input"
+pushed fail 'second ref carries the value after a deletion' "$repo"
+print -r -- "refs/heads/old $zero refs/heads/old $added" > "$sandbox/pre-push-input"
+pushed pass 'deleting a ref pushes no commit' "$repo"
+: > "$sandbox/pre-push-input"
+pushed pass 'nothing to push' "$repo"
+
+# A new branch pushes only the commits the remote does not have.
+git -C "$repo" update-ref refs/remotes/origin/main "$removed"
+push_lines "$clean" "$zero" > "$sandbox/pre-push-input"
+pushed pass 'new branch whose bad commit the remote has' "$repo"
+git -C "$repo" update-ref -d refs/remotes/origin/main
+
+# A remote commit this clone does not have bounds nothing, so every commit not
+# on a remote is read.
+push_lines "$clean" 1111111111111111111111111111111111111111 > "$sandbox/pre-push-input"
+pushed fail 'remote commit this clone does not have' "$repo"
+
+# Input git cannot have sent, or a commit that cannot be read, is a failure.
+push_lines 2222222222222222222222222222222222222222 "$zero" > "$sandbox/pre-push-input"
+pushed fail 'pushed commit git cannot read' "$repo"
+print -r -- 'refs/heads/main' > "$sandbox/pre-push-input"
+pushed fail 'push line with missing fields' "$repo"
+
+# The pushed commit is read in full, so a file added in it is found as well.
+git -C "$repo" read-tree --empty
+git -C "$repo" add -f scripts/check
+mkdir -p "$repo/Keys"
+print -r -- x > "$repo/Keys/a.pem"
+git -C "$repo" add -f Keys/a.pem
+asset="$(commit)"
+git -C "$repo" rm -q --cached Keys/a.pem
+push_lines "$asset" "$zero" > "$sandbox/pre-push-input"
+pushed fail 'signing asset committed and then removed' "$repo"
+rm -rf "$repo/Keys"
+git -C "$repo" read-tree --empty
 
 # Outside a git repository the step cannot check anything and fails.
 bare="$sandbox/bare"
