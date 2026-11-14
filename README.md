@@ -56,7 +56,7 @@ VPN requires Swift 6.4 and Xcode 27. It runs on iOS 26 and macOS 26. Linting nee
 
 ## Community
 
-Report a bug or ask a question in the repository's [issues](https://github.com/nu11waredev/swift-vpn/issues). Report a vulnerability privately from the repository's Security tab. [`SECURITY.md`](SECURITY.md) has the details.
+For casual chat about the project, join the [Discord server](https://discord.gg/d8KgvpAKcv). Report a bug or ask a question in the repository's [issues](https://github.com/nu11waredev/swift-vpn/issues). Report a vulnerability privately from the repository's Security tab. [`SECURITY.md`](SECURITY.md) has the details.
 
 ## License
 

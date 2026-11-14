@@ -8,7 +8,7 @@ Issues and pull requests are welcome. For anything larger than a fix, open an is
 scripts/check
 ```
 
-`scripts/check` tests the signing step, runs the package tests, builds the app for the iOS Simulator and macOS without code signing, runs `swiftformat --lint` and fails when a tracked file carries signing values. `scripts/check signing` runs that last step alone, and `scripts/test-signing-check` tests it. `scripts/install-hooks.sh` makes `git push` run it first.
+`scripts/check` tests the signing step, runs the package tests, builds the app for the iOS Simulator and macOS without code signing, runs `swiftformat --lint` and fails when a tracked file carries signing values. `scripts/check signing` runs that last step alone, and `scripts/test-signing-check` tests it. `swift test --package-path VPNCore` runs the package tests alone. CI runs `scripts/check` on macOS for every pull request and every push to `main`. `scripts/install-hooks.sh` makes `git push` run it first.
 
 Signing values belong in `Config/Local.xcconfig`, which Git ignores. The signing step reads the tracked files as Git stores them, and it fails when Git does. It refuses these:
 
@@ -22,11 +22,13 @@ An empty value, a `-` identity and a reference such as `$(inherited)` pass.
 
 ## Tests
 
-Run the package tests alone with `swift test --package-path VPNCore`. `scripts/check` builds, tests and lints. The key pair tests check the public keys of the two private keys in RFC 7748, section 6.1, the base64 form of both pairs, round trips through bytes and base64, and the error for each rejected input: private keys of the wrong length, base64 text that is not 44 characters long, base64 that spells the wrong number of bytes, and text that is not canonical base64.
+The key pair tests check the public keys of the two private keys in RFC 7748, section 6.1, the base64 form of both pairs, round trips through bytes and base64, and the error for each rejected input: private keys of the wrong length, base64 text that is not 44 characters long, base64 that spells the wrong number of bytes, and text that is not canonical base64.
 
 The base64 code is checked against the vectors in RFC 4648, section 10, and its length limit has its own tests. The tests of the byte comparison check its result for equal byte strings, for byte strings that differ at one position and for byte strings of different lengths. The test of `wipe()` checks that it sets every byte of an array to zero.
 
-`scripts/test-signing-check` tests the signing step of `scripts/check` in throwaway Git repositories, with a case for each kind of value it refuses and each kind it accepts. Tests compile and check the usage example in the README. CI runs the same script on macOS for every pull request and every push to `main`.
+`scripts/test-signing-check` tests the signing step of `scripts/check` in throwaway Git repositories, with a case for each kind of value it refuses and each kind it accepts.
+
+Tests compile and check the usage example in the README.
 
 ## Commits
 
